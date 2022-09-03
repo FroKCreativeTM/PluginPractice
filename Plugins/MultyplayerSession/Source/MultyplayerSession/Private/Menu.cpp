@@ -4,9 +4,15 @@
 #include "Menu.h"
 #include "Components/Button.h"
 #include "MultiplayerSessionSubsystem.h"
+#include "OnlineSessionSettings.h"
+#include "OnlineSubsystem.h"
 
-void UMenu::MenuSetup()
+void UMenu::MenuSetup(int32 NumberOfPublicConnections, FString TypeOfMatch, FString LobbyPath)
 {
+	PathToLobby = FString::Printf(TEXT("%s?listen"), *LobbyPath);
+	NumPublicConnections = NumberOfPublicConnections;
+	MatchType = TypeOfMatch;
+
 	AddToViewport();
 	SetVisibility(ESlateVisibility::Visible);
 	bIsFocusable = true;
@@ -31,6 +37,15 @@ void UMenu::MenuSetup()
 	{
 		MultiplayerSessionSubsystem = GameInstance->GetSubsystem<UMultiplayerSessionSubsystem>();
 	}
+
+	if (MultiplayerSessionSubsystem)
+	{
+		MultiplayerSessionSubsystem->MultiplayerOnCreateSessionComplete.AddDynamic(this, &ThisClass::OnCreateSession);
+		MultiplayerSessionSubsystem->MultiplayerOnFindSessionsComplete.AddUObject(this, &ThisClass::OnFindSessions);
+		MultiplayerSessionSubsystem->MultiplayerOnJoinSessionComplete.AddUObject(this, &ThisClass::OnJoinSession);
+		MultiplayerSessionSubsystem->MultiplayerOnDestroySessionComplete.AddDynamic(this, &ThisClass::OnDestroySession);
+		MultiplayerSessionSubsystem->MultiplayerOnStartSessionComplete.AddDynamic(this, &ThisClass::OnStartSession);
+	}
 }
 
 bool UMenu::Initialize()
@@ -53,29 +68,120 @@ bool UMenu::Initialize()
 	return true;
 }
 
-void UMenu::HostButtonClicked()
+void UMenu::OnLevelRemovedFromWorld(ULevel* InLevel, UWorld* InWorld)
 {
-	if (GEngine)
+	MenuTearDown();
+	Super::OnLevelRemovedFromWorld(InLevel, InWorld);
+}
+
+void UMenu::OnCreateSession(bool bWasSuccessful)
+{
+	// 技记 积己俊 己傍茄 版快
+	if (bWasSuccessful)
 	{
-		GEngine->AddOnScreenDebugMessage(
-			-1, 15.f,
-			FColor::Yellow,
-			FString(TEXT("Host Button Clicked")));
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			World->ServerTravel(PathToLobby);
+		}
+	}
+	else
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				15.f,
+				FColor::Red,
+				FString(TEXT("Failed to create session!"))
+			);
+		}
+		HostButton->SetIsEnabled(true);
+	}
+}
+
+void UMenu::OnFindSessions(const TArray<FOnlineSessionSearchResult>& SessionResults, bool bWasSuccessful)
+{
+	if (MultiplayerSessionSubsystem == nullptr)
+	{
+		return;
 	}
 
+	for (auto Result : SessionResults)
+	{
+		FString SettingsValue;
+		Result.Session.SessionSettings.Get(FName("MatchType"), SettingsValue);
+		if (SettingsValue == MatchType)
+		{
+			MultiplayerSessionSubsystem->JoinSession(Result);
+			return;
+		}
+	}
+
+	if (!bWasSuccessful || SessionResults.Num() == 0)
+	{
+		JoinButton->SetIsEnabled(true);
+	}
+}
+
+void UMenu::OnJoinSession(EOnJoinSessionCompleteResult::Type Result)
+{
+	IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get();
+	if (Subsystem)
+	{
+		IOnlineSessionPtr SessionInterface = Subsystem->GetSessionInterface();
+		if (SessionInterface.IsValid())
+		{
+			FString Address;
+			SessionInterface->GetResolvedConnectString(NAME_GameSession, Address);
+
+			APlayerController* PlayerController = GetGameInstance()->GetFirstLocalPlayerController();
+			if (PlayerController)
+			{
+				PlayerController->ClientTravel(Address, ETravelType::TRAVEL_Absolute);
+			}
+		}
+	}
+}
+
+void UMenu::OnDestroySession(bool bWasSuccessful)
+{
+}
+
+void UMenu::OnStartSession(bool bWasSuccessful)
+{
+}
+
+void UMenu::HostButtonClicked()
+{
+	HostButton->SetIsEnabled(false);
 	if (MultiplayerSessionSubsystem)
 	{
-		MultiplayerSessionSubsystem->CreateSession(4, FString("FreeForAll"));
+		MultiplayerSessionSubsystem->CreateSession(NumPublicConnections, MatchType);
 	}
 }
 
 void UMenu::JoinButtonClicked()
 {
-	if (GEngine)
+	JoinButton->SetIsEnabled(false);
+	if (MultiplayerSessionSubsystem)
 	{
-		GEngine->AddOnScreenDebugMessage(
-			-1, 15.f,
-			FColor::Yellow,
-			FString(TEXT("Join Button Clicked")));
+		MultiplayerSessionSubsystem->FindSessions(10000);
+	}
+}
+
+void UMenu::MenuTearDown()
+{
+	RemoveFromParent();
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		APlayerController* PlayerController = World->GetFirstPlayerController();
+		if (PlayerController)
+		{
+			FInputModeUIOnly InputModeData;
+			PlayerController->SetInputMode(InputModeData);
+			PlayerController->SetShowMouseCursor(false);
+		}
 	}
 }

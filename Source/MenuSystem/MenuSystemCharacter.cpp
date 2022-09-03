@@ -63,16 +63,6 @@ AMenuSystemCharacter::AMenuSystemCharacter() :
 	{
 		// 이 온라인 세션 인터페이스를 이용해서 스레드 세이프하게 
 		OnlineSessionInterface = OnlineSubsystem->GetSessionInterface();
-
-		if (GEngine)
-		{
-			// NULL로 시작한다. 하지만 진짜 없다는 뜻은 아니다.
-			// 서비스와 연결되지 않은 경우 NULL로 뜬다.
-			GEngine->AddOnScreenDebugMessage(
-				-1, 15.f,
-				FColor::Blue,
-				FString::Printf(TEXT("Found subsystem %s"), *OnlineSubsystem->GetSubsystemName().ToString()));
-		}
 	}
 }
 
